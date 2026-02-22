@@ -126,9 +126,9 @@ function Home() {
 				window.AudioContext || (window as any).webkitAudioContext
 			)();
 			audioContextRef.current = audioCtx;
-			
+
 			const source = audioCtx.createMediaStreamSource(stream);
-			
+
 			// Use ScriptProcessor with appropriate buffer size
 			// Buffer sizes: 256, 512, 1024, 2048, 4096, 8192, 16384
 			// Larger = more latency but more stable
@@ -139,9 +139,9 @@ function Home() {
 			processor.onaudioprocess = (e) => {
 				if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)
 					return;
-				
+
 				const inputData = e.inputBuffer.getChannelData(0);
-				
+
 				// Resample to 16kHz if needed (browser may give us 44.1kHz, 48kHz, etc.)
 				const targetSampleRate = 16000;
 				const resampledData = resampleAudio(
@@ -149,16 +149,16 @@ function Home() {
 					audioCtx.sampleRate,
 					targetSampleRate,
 				);
-				
+
 				// Convert Float32 (-1 to 1) to Int16 PCM for consistent server format
 				const int16Data = new Int16Array(resampledData.length);
 				for (let i = 0; i < resampledData.length; i++) {
 					// Clamp to [-1, 1] range to prevent clipping
 					const s = Math.max(-1, Math.min(1, resampledData[i]));
 					// Convert to 16-bit integer
-					int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+					int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
 				}
-				
+
 				// Send as binary (Int16 PCM bytes)
 				wsRef.current.send(int16Data.buffer);
 			};
@@ -238,6 +238,7 @@ function Home() {
 			<div className="flex gap-4 mb-8">
 				{!isRecording ? (
 					<button
+						type="button"
 						onClick={startRecording}
 						className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition"
 					>
@@ -245,6 +246,7 @@ function Home() {
 					</button>
 				) : (
 					<button
+						type="button"
 						onClick={stopRecording}
 						className="bg-red-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-700 transition"
 					>
@@ -252,6 +254,7 @@ function Home() {
 					</button>
 				)}
 				<button
+					type="button"
 					onClick={clearTranscript}
 					className="bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-semibold hover:bg-gray-300 transition"
 				>
