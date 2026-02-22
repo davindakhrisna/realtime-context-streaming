@@ -14,7 +14,7 @@
   "chosenAddOns": [
     "biome",
     "nitro",
-    "t3env",
-    "shadcn"
+    "shadcn",
+    "t3env"
   ]
 }
