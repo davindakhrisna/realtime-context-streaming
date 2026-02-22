@@ -13,9 +13,9 @@
   "framework": "react-cra",
   "chosenAddOns": [
     "biome",
-    "railway",
-    "shadcn",
+    "nitro",
+    "tanstack-query",
     "t3env",
-    "tanstack-query"
+    "shadcn"
   ]
 }

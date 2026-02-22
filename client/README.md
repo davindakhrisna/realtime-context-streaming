@@ -50,15 +50,6 @@ pnpm check
 ```
 
 
-## Shadcn
-
-Add components using the latest version of [Shadcn](https://ui.shadcn.com/).
-
-```bash
-pnpm dlx shadcn@latest add button
-```
-
-
 ## T3Env
 
 - You can use T3Env to add type safety to your environment variables.
@@ -75,6 +66,15 @@ console.log(env.VITE_APP_TITLE);
 
 
 
+
+
+## Shadcn
+
+Add components using the latest version of [Shadcn](https://ui.shadcn.com/).
+
+```bash
+pnpm dlx shadcn@latest add button
+```
 
 
 

@@ -22,8 +22,8 @@ pnpm dev
 
 Download Model :
 
-<https://huggingface.co/ggml-org/moondream2-20250414-GGUF/tree/main> (Download both files)
-and copy them to the `/models` under the server folder
+<https://huggingface.co/ggml-org/moondream2-20250414-GGUF/tree/main>
+Download both files and copy them to the `/models` under the server folder
 
 or
 
