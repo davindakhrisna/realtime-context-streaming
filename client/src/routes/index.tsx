@@ -36,18 +36,23 @@ function Home() {
 	const [isRecording, setIsRecording] = useState(false);
 	const [transcript, setTranscript] = useState("");
 	const [status, setStatus] = useState("Idle");
-	const [browserSupported, setBrowserSupported] = useState<boolean | null>(null);
+	const [browserSupported, setBrowserSupported] = useState<boolean | null>(
+		null,
+	);
+	const [screenAnalysis, setScreenAnalysis] = useState<string>("");
 
 	const wsRef = useRef<WebSocket | null>(null);
 	const audioContextRef = useRef<AudioContext | null>(null);
 	const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
 	const mediaStreamRef = useRef<MediaStream | null>(null);
+	const videoElementRef = useRef<HTMLVideoElement | null>(null);
+	const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
+	const frameIntervalRef = useRef<number | null>(null);
 
 	// Check browser support for getDisplayMedia with audio
 	const checkBrowserSupport = () => {
 		const isChrome =
-			/Chrome/.test(navigator.userAgent) &&
-			/Google Inc/.test(navigator.vendor);
+			/Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
 		const isEdge = /Edg/.test(navigator.userAgent);
 		setBrowserSupported(isChrome || isEdge);
 		return isChrome || isEdge;
@@ -66,6 +71,14 @@ function Home() {
 					if (wsRef.current?.readyState === WebSocket.OPEN)
 						setStatus("Connected");
 				}, 2000);
+			} else if (data.type === "frame_analysis") {
+				// Server sends screen frame analysis result
+				setScreenAnalysis(data.analysis || "");
+				setStatus("Screen analyzed");
+				setTimeout(() => {
+					if (wsRef.current?.readyState === WebSocket.OPEN)
+						setStatus("Connected");
+				}, 3000);
 			}
 		};
 		wsRef.current.onclose = () => setStatus("Disconnected");
@@ -113,11 +126,73 @@ function Home() {
 				return;
 			}
 
-			// Optional: Stop video track if we only need audio
-			// This reduces resource usage but keeps audio working
-			if (videoTrack) {
-				videoTrack.stop();
+			if (!videoTrack) {
+				setStatus("No Video Track - Can't capture frames");
+				for (const track of stream.getTracks()) {
+					track.stop();
+				}
+				return;
 			}
+
+			// Create hidden video element to render frames
+			const video = document.createElement("video");
+			video.srcObject = stream;
+			video.muted = true;
+			video.playsInline = true;
+			await video.play();
+			videoElementRef.current = video;
+
+			// Create canvas for frame capture
+			const canvas = document.createElement("canvas");
+			canvas.width = video.videoWidth || 1280;
+			canvas.height = video.videoHeight || 720;
+			canvasElementRef.current = canvas;
+
+			// Capture frame function - sends JPEG via WebSocket
+			const captureFrame = () => {
+				if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+					return;
+				}
+				if (!videoElementRef.current || !canvasElementRef.current) {
+					return;
+				}
+
+				const ctx = canvasElementRef.current.getContext("2d");
+				if (!ctx) return;
+
+				// Draw current video frame to canvas
+				ctx.drawImage(
+					videoElementRef.current,
+					0, 0,
+					canvasElementRef.current.width,
+					canvasElementRef.current.height
+				);
+
+				// Convert canvas to JPEG blob and send
+				canvasElementRef.current.toBlob((blob) => {
+					if (!blob || !wsRef.current) return;
+
+					const reader = new FileReader();
+					reader.onload = () => {
+						if (!wsRef.current) return;
+						const jpegArray = new Uint8Array(reader.result as ArrayBuffer);
+						
+						// Create message with type header: [0x01, ...jpegBytes]
+						// 0x00 = audio, 0x01 = video frame
+						const message = new Uint8Array(jpegArray.length + 1);
+						message[0] = 0x01; // Frame type marker
+						message.set(jpegArray, 1);
+						
+						wsRef.current?.send(message);
+					};
+					reader.readAsArrayBuffer(blob);
+				}, "image/jpeg", 0.8); // 80% quality JPEG
+			};
+
+			// Start frame capture interval (every 10 seconds)
+			frameIntervalRef.current = window.setInterval(captureFrame, 10000);
+			// Capture first frame after a short delay
+			setTimeout(captureFrame, 1000);
 
 			// Handle user stopping screen share via browser UI
 			audioTrack.onended = () => {
@@ -186,6 +261,23 @@ function Home() {
 	};
 
 	const stopRecording = () => {
+		// Stop frame capture interval
+		if (frameIntervalRef.current) {
+			window.clearInterval(frameIntervalRef.current);
+			frameIntervalRef.current = null;
+		}
+
+		// Clean up video element
+		if (videoElementRef.current) {
+			videoElementRef.current.srcObject = null;
+			videoElementRef.current = null;
+		}
+
+		// Clean up canvas
+		if (canvasElementRef.current) {
+			canvasElementRef.current = null;
+		}
+
 		// Disconnect audio nodes in reverse order of connection
 		if (scriptProcessorRef.current) {
 			scriptProcessorRef.current.disconnect();
@@ -234,7 +326,8 @@ function Home() {
 				<div className="mb-6 p-4 bg-red-50 border-l-4 border-red-400 text-red-700 text-sm rounded">
 					<p className="font-bold">Browser Not Supported</p>
 					<p className="mt-2">
-						Please use <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> for screen audio capture.
+						Please use <strong>Google Chrome</strong> or{" "}
+						<strong>Microsoft Edge</strong> for screen audio capture.
 					</p>
 				</div>
 			)}
@@ -287,6 +380,17 @@ function Home() {
 					)}
 				</p>
 			</div>
+
+			{screenAnalysis && (
+				<div className="border-2 border-purple-200 rounded-xl p-6 bg-purple-50 min-h-[100px] shadow-inner mt-6">
+					<h3 className="text-xs uppercase tracking-wide text-purple-400 font-bold mb-2">
+						Screen Analysis
+					</h3>
+					<p className="text-lg text-purple-800 leading-relaxed">
+						{screenAnalysis}
+					</p>
+				</div>
+			)}
 		</div>
 	);
 }

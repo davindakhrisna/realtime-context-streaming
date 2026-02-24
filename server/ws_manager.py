@@ -2,6 +2,11 @@ import asyncio
 import numpy as np
 from fastapi import WebSocket
 from models import transcribe_audio_buffer_with_timestamps
+from vision import analyze_image
+
+# Message type markers
+MSG_TYPE_AUDIO = 0x00
+MSG_TYPE_FRAME = 0x01
 
 # --- Configuration ---
 SAMPLE_RATE = 16000
@@ -159,6 +164,7 @@ class AudioState:
         self.is_speaking = False
         self.last_process_time = 0.0  # Track when we last processed
         self.speech_end_time = 0.0  # When speech stopped (for timeout)
+        self.last_frame_time = 0.0  # Track last frame analysis time
 
 
 async def handle_audio_stream(websocket: WebSocket):
@@ -171,6 +177,39 @@ async def handle_audio_stream(websocket: WebSocket):
         while True:
             data = await websocket.receive_bytes()
             current_time = time.time()
+
+            # Check message type from first byte
+            msg_type = data[0] if len(data) > 0 else MSG_TYPE_AUDIO
+
+            # Handle video frame (JPEG with 0x01 prefix)
+            if msg_type == MSG_TYPE_FRAME:
+                jpeg_bytes = data[1:]  # Skip type header
+                if DEBUG:
+                    print(f"[DEBUG] Received frame: {len(jpeg_bytes)} bytes")
+                
+                # Analyze frame with Moondream
+                try:
+                    loop = asyncio.get_event_loop()
+                    analysis = await loop.run_in_executor(
+                        None,
+                        analyze_image,
+                        jpeg_bytes,
+                        "Describe what you see on this screen. Focus on visible text, UI elements, and content."
+                    )
+                    
+                    if DEBUG:
+                        print(f"[DEBUG] Frame analysis: {analysis[:100]}...")
+                    
+                    await websocket.send_json({
+                        "type": "frame_analysis",
+                        "analysis": analysis
+                    })
+                except Exception as e:
+                    print(f"Frame analysis error: {e}")
+                continue
+
+            # Handle audio (Int16 PCM, no prefix or 0x00 prefix)
+            # Backward compatible: raw audio bytes without header
 
             # Calculate energy with smoothing for stable VAD
             current_energy = calculate_energy(data)
