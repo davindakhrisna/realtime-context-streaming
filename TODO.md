@@ -6,8 +6,8 @@
 - Initialize local vector db
 - Test local vector db (Create, Delete, Read)
 - Integrate STT through websocket (client -> server)
-
 - Initialize Moondream2 into the project
+
 - Integrate the function to do screen capture every 10 seconds && pixel change from the client
 - Create a HTTP communication for client -> server to transport screen frame
 - Have every sent screen capture to be processed and summarised by the local VLM
