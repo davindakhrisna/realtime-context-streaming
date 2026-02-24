@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from db import collection
 from ws_manager import handle_audio_stream
-from vision import load_model, analyze_image
+from vision import load_model
 import asyncio
 
 app = FastAPI()

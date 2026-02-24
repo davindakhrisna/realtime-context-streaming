@@ -1,9 +1,28 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 
 export const Route = createFileRoute("/")({
 	component: Home,
 });
+
+// Frame capture timing constants
+const FRAME_CAPTURE_INTERVAL_MS = 10000;
+const FIRST_FRAME_DELAY_MS = 1000;
+
+// WebSocket connection constants
+const WS_RECONNECT_DELAY_MS = 500;
+const STATUS_RESET_DELAY_MS = 2000;
+const FRAME_STATUS_RESET_DELAY_MS = 3000;
+
+// Audio processing constants
+const TARGET_SAMPLE_RATE = 16000;
+const HIGH_SAMPLE_RATE_THRESHOLD = 48000;
+const BUFFER_SIZE_HIGH_SAMPLE_RATE = 8192;
+const BUFFER_SIZE_LOW_SAMPLE_RATE = 4096;
+
+// Message type markers
+const MSG_TYPE_FRAME = 0x01;
+const JPEG_QUALITY = 0.8;
 
 /**
  * Resamples audio data from one sample rate to another.
@@ -49,6 +68,15 @@ function Home() {
 	const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
 	const frameIntervalRef = useRef<number | null>(null);
 
+	// Cleanup on unmount
+	useEffect(() => {
+		return () => {
+			if (isRecording) {
+				stopRecording();
+			}
+		};
+	}, [isRecording]);
+
 	// Check browser support for getDisplayMedia with audio
 	const checkBrowserSupport = () => {
 		const isChrome =
@@ -58,37 +86,185 @@ function Home() {
 		return isChrome || isEdge;
 	};
 
-	const connect = () => {
-		wsRef.current = new WebSocket("ws://localhost:8000/ws");
-		wsRef.current.onopen = () => setStatus("Connected");
-		wsRef.current.onmessage = (event) => {
-			const data = JSON.parse(event.data);
-			if (data.type === "result") {
-				// Server sends ONLY new text now - just append it
-				setTranscript((prev) => `${prev ? `${prev} ` : ""}${data.text.trim()}`);
-				setStatus("Transcribing...");
-				setTimeout(() => {
-					if (wsRef.current?.readyState === WebSocket.OPEN)
-						setStatus("Connected");
-				}, 2000);
-			} else if (data.type === "frame_analysis") {
-				// Server sends screen frame analysis result
-				setScreenAnalysis(data.analysis || "");
-				setStatus("Screen analyzed");
-				setTimeout(() => {
-					if (wsRef.current?.readyState === WebSocket.OPEN)
-						setStatus("Connected");
-				}, 3000);
+	const connect = async () => {
+		return new Promise<void>((resolve, reject) => {
+			wsRef.current = new WebSocket("ws://localhost:8000/ws");
+			wsRef.current.onopen = () => {
+				setStatus("Connected");
+				resolve();
+			};
+			wsRef.current.onmessage = (event) => {
+				const data = JSON.parse(event.data) as {
+					type: string;
+					text?: string;
+					analysis?: string;
+					error?: string;
+				};
+				if (data.type === "result") {
+					// Server sends ONLY new text now - just append it
+					setTranscript((prev) =>
+						`${prev ? `${prev} ` : ""}${data.text?.trim() ?? ""}`,
+					);
+					setStatus("Transcribing...");
+					setTimeout(() => {
+						if (wsRef.current?.readyState === WebSocket.OPEN)
+							setStatus("Connected");
+					}, STATUS_RESET_DELAY_MS);
+				} else if (data.type === "frame_analysis") {
+					// Server sends screen frame analysis result
+					setScreenAnalysis(data.analysis ?? "");
+					setStatus("Screen analyzed");
+					setTimeout(() => {
+						if (wsRef.current?.readyState === WebSocket.OPEN)
+							setStatus("Connected");
+					}, FRAME_STATUS_RESET_DELAY_MS);
+				} else if (data.type === "frame_analysis_error") {
+					console.error("Frame analysis error:", data.error);
+					setStatus("Frame analysis failed");
+					setTimeout(() => {
+						if (wsRef.current?.readyState === WebSocket.OPEN)
+							setStatus("Connected");
+					}, FRAME_STATUS_RESET_DELAY_MS);
+				}
+			};
+			wsRef.current.onclose = () => setStatus("Disconnected");
+			wsRef.current.onerror = () => {
+				setStatus("WebSocket Error");
+				reject(new Error("WebSocket error"));
+			};
+		});
+	};
+
+	const cleanupStream = (stream: MediaStream) => {
+		for (const track of stream.getTracks()) {
+			track.stop();
+		}
+	};
+
+	const setupFrameCapture = async (stream: MediaStream) => {
+		// Create hidden video element to render frames
+		const video = document.createElement("video");
+		video.srcObject = stream;
+		video.muted = true;
+		video.playsInline = true;
+		await video.play();
+		videoElementRef.current = video;
+
+		// Create canvas for frame capture
+		const canvas = document.createElement("canvas");
+		canvas.width = video.videoWidth || 1280;
+		canvas.height = video.videoHeight || 720;
+		canvasElementRef.current = canvas;
+
+		// Capture frame function - sends JPEG via WebSocket
+		const captureFrame = () => {
+			if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+				return;
 			}
+			if (!videoElementRef.current || !canvasElementRef.current) {
+				return;
+			}
+
+			const ctx = canvasElementRef.current.getContext("2d");
+			if (!ctx) return;
+
+			// Draw current video frame to canvas
+			ctx.drawImage(
+				videoElementRef.current,
+				0, 0,
+				canvasElementRef.current.width,
+				canvasElementRef.current.height,
+			);
+
+			// Convert canvas to JPEG blob and send
+			canvasElementRef.current.toBlob((blob) => {
+				if (!blob || !wsRef.current) return;
+
+				const reader = new FileReader();
+				reader.onload = () => {
+					if (!wsRef.current) return;
+					const jpegArray = new Uint8Array(reader.result as ArrayBuffer);
+
+					// Create message with type header: [0x01, ...jpegBytes]
+					const message = new Uint8Array(jpegArray.length + 1);
+					message[0] = MSG_TYPE_FRAME;
+					message.set(jpegArray, 1);
+
+					wsRef.current?.send(message);
+				};
+				reader.readAsArrayBuffer(blob);
+			}, "image/jpeg", JPEG_QUALITY);
 		};
-		wsRef.current.onclose = () => setStatus("Disconnected");
-		wsRef.current.onerror = () => setStatus("WebSocket Error");
+
+		// Start frame capture interval
+		frameIntervalRef.current = window.setInterval(
+			captureFrame,
+			FRAME_CAPTURE_INTERVAL_MS,
+		);
+		// Capture first frame after a short delay
+		setTimeout(captureFrame, FIRST_FRAME_DELAY_MS);
+
+		// Handle user stopping screen share via browser UI
+		const audioTrack = stream.getAudioTracks()[0];
+		if (audioTrack) {
+			audioTrack.onended = () => {
+				stopRecording();
+			};
+		}
+	};
+
+	const setupAudioProcessing = (stream: MediaStream) => {
+		// Create AudioContext with browser's default sample rate
+		const audioCtx = new (window.AudioContext ||
+			(window as { webkitAudioContext?: typeof AudioContext })
+				.webkitAudioContext)();
+		audioContextRef.current = audioCtx;
+
+		const source = audioCtx.createMediaStreamSource(stream);
+
+		// Use ScriptProcessor with appropriate buffer size
+		const bufferSize =
+			audioCtx.sampleRate >= HIGH_SAMPLE_RATE_THRESHOLD
+				? BUFFER_SIZE_HIGH_SAMPLE_RATE
+				: BUFFER_SIZE_LOW_SAMPLE_RATE;
+		const processor = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+		scriptProcessorRef.current = processor;
+
+		processor.onaudioprocess = (e) => {
+			if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+			const inputData = e.inputBuffer.getChannelData(0);
+
+			// Resample to 16kHz if needed
+			const resampledData = resampleAudio(
+				inputData,
+				audioCtx.sampleRate,
+				TARGET_SAMPLE_RATE,
+			);
+
+			// Convert Float32 (-1 to 1) to Int16 PCM
+			const int16Data = new Int16Array(resampledData.length);
+			for (let i = 0; i < resampledData.length; i++) {
+				const s = Math.max(-1, Math.min(1, resampledData[i]));
+				int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+			}
+
+			wsRef.current.send(int16Data.buffer);
+		};
+
+		source.connect(processor);
+		processor.connect(audioCtx.destination);
 	};
 
 	const startRecording = async () => {
+		// Connect to WebSocket if not already connected
 		if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-			connect();
-			await new Promise((r) => setTimeout(r, 500));
+			try {
+				await connect();
+			} catch {
+				setStatus("Failed to connect to server");
+				return;
+			}
 		}
 
 		try {
@@ -99,152 +275,38 @@ function Home() {
 				return;
 			}
 
-			// Request screen share with audio using getDisplayMedia
-			// Video is required for audio capture, but we can stop the video track after
+			// Request screen share with audio
 			const stream = await navigator.mediaDevices.getDisplayMedia({
 				video: true,
 				audio: {
-					// Request system audio (Chrome 131+)
 					systemAudio: "include",
-					// For window capture, include all system audio
 					windowAudio: "system",
 				},
 			});
 
 			mediaStreamRef.current = stream;
 
-			// Get the audio track from the stream
+			// Validate tracks
 			const audioTrack = stream.getAudioTracks()[0];
 			const videoTrack = stream.getVideoTracks()[0];
 
 			if (!audioTrack) {
 				setStatus("No Audio Track - User didn't share audio");
-				// Stop the stream since there's no audio
-				for (const track of stream.getTracks()) {
-					track.stop();
-				}
+				cleanupStream(stream);
 				return;
 			}
 
 			if (!videoTrack) {
 				setStatus("No Video Track - Can't capture frames");
-				for (const track of stream.getTracks()) {
-					track.stop();
-				}
+				cleanupStream(stream);
 				return;
 			}
 
-			// Create hidden video element to render frames
-			const video = document.createElement("video");
-			video.srcObject = stream;
-			video.muted = true;
-			video.playsInline = true;
-			await video.play();
-			videoElementRef.current = video;
+			// Setup video and canvas for frame capture
+			await setupFrameCapture(stream);
 
-			// Create canvas for frame capture
-			const canvas = document.createElement("canvas");
-			canvas.width = video.videoWidth || 1280;
-			canvas.height = video.videoHeight || 720;
-			canvasElementRef.current = canvas;
-
-			// Capture frame function - sends JPEG via WebSocket
-			const captureFrame = () => {
-				if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-					return;
-				}
-				if (!videoElementRef.current || !canvasElementRef.current) {
-					return;
-				}
-
-				const ctx = canvasElementRef.current.getContext("2d");
-				if (!ctx) return;
-
-				// Draw current video frame to canvas
-				ctx.drawImage(
-					videoElementRef.current,
-					0, 0,
-					canvasElementRef.current.width,
-					canvasElementRef.current.height
-				);
-
-				// Convert canvas to JPEG blob and send
-				canvasElementRef.current.toBlob((blob) => {
-					if (!blob || !wsRef.current) return;
-
-					const reader = new FileReader();
-					reader.onload = () => {
-						if (!wsRef.current) return;
-						const jpegArray = new Uint8Array(reader.result as ArrayBuffer);
-						
-						// Create message with type header: [0x01, ...jpegBytes]
-						// 0x00 = audio, 0x01 = video frame
-						const message = new Uint8Array(jpegArray.length + 1);
-						message[0] = 0x01; // Frame type marker
-						message.set(jpegArray, 1);
-						
-						wsRef.current?.send(message);
-					};
-					reader.readAsArrayBuffer(blob);
-				}, "image/jpeg", 0.8); // 80% quality JPEG
-			};
-
-			// Start frame capture interval (every 10 seconds)
-			frameIntervalRef.current = window.setInterval(captureFrame, 10000);
-			// Capture first frame after a short delay
-			setTimeout(captureFrame, 1000);
-
-			// Handle user stopping screen share via browser UI
-			audioTrack.onended = () => {
-				stopRecording();
-			};
-
-			// Create AudioContext with browser's default sample rate
-			const audioCtx = new (
-				window.AudioContext ||
-				(window as { webkitAudioContext?: typeof AudioContext })
-					.webkitAudioContext
-			)();
-			audioContextRef.current = audioCtx;
-
-			const source = audioCtx.createMediaStreamSource(stream);
-
-			// Use ScriptProcessor with appropriate buffer size
-			// Buffer sizes: 256, 512, 1024, 2048, 4096, 8192, 16384
-			// Larger = more latency but more stable
-			const bufferSize = audioCtx.sampleRate >= 48000 ? 8192 : 4096;
-			const processor = audioCtx.createScriptProcessor(bufferSize, 1, 1);
-			scriptProcessorRef.current = processor;
-
-			processor.onaudioprocess = (e) => {
-				if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)
-					return;
-
-				const inputData = e.inputBuffer.getChannelData(0);
-
-				// Resample to 16kHz if needed (browser may give us 44.1kHz, 48kHz, etc.)
-				const targetSampleRate = 16000;
-				const resampledData = resampleAudio(
-					inputData,
-					audioCtx.sampleRate,
-					targetSampleRate,
-				);
-
-				// Convert Float32 (-1 to 1) to Int16 PCM for consistent server format
-				const int16Data = new Int16Array(resampledData.length);
-				for (let i = 0; i < resampledData.length; i++) {
-					// Clamp to [-1, 1] range to prevent clipping
-					const s = Math.max(-1, Math.min(1, resampledData[i]));
-					// Convert to 16-bit integer
-					int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-				}
-
-				// Send as binary (Int16 PCM bytes)
-				wsRef.current.send(int16Data.buffer);
-			};
-
-			source.connect(processor);
-			processor.connect(audioCtx.destination);
+			// Setup audio processing
+			setupAudioProcessing(stream);
 
 			setIsRecording(true);
 			setTranscript("");

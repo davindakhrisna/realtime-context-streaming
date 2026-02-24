@@ -1,4 +1,6 @@
 import asyncio
+import time
+import re
 import numpy as np
 from fastapi import WebSocket
 from models import transcribe_audio_buffer_with_timestamps
@@ -48,8 +50,6 @@ def normalize_text_for_comparison(text: str) -> str:
     - Lowercase
     - Normalize whitespace
     """
-    import re
-    
     # Common number to word mappings
     number_map = {
         '0': 'zero', '1': 'one', '2': 'two', '3': 'three', '4': 'four',
@@ -164,14 +164,12 @@ class AudioState:
         self.is_speaking = False
         self.last_process_time = 0.0  # Track when we last processed
         self.speech_end_time = 0.0  # When speech stopped (for timeout)
-        self.last_frame_time = 0.0  # Track last frame analysis time
 
 
 async def handle_audio_stream(websocket: WebSocket):
     await websocket.accept()
     state = AudioState()
     process_count = 0
-    import time
 
     try:
         while True:
@@ -206,11 +204,13 @@ async def handle_audio_stream(websocket: WebSocket):
                     })
                 except Exception as e:
                     print(f"Frame analysis error: {e}")
+                    await websocket.send_json({
+                        "type": "frame_analysis_error",
+                        "error": str(e)
+                    })
                 continue
 
-            # Handle audio (Int16 PCM, no prefix or 0x00 prefix)
-            # Backward compatible: raw audio bytes without header
-
+            # Handle audio (Int16 PCM)
             # Calculate energy with smoothing for stable VAD
             current_energy = calculate_energy(data)
             state.smoothed_energy = (
