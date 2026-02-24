@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useRef } from "react";
+import { useRef, useState } from "react";
 
 export const Route = createFileRoute("/")({
 	component: Home,
@@ -32,38 +32,26 @@ function resampleAudio(
 	return result;
 }
 
-function findLoopbackDevice(
-	devices: MediaDeviceInfo[],
-): MediaDeviceInfo | null {
-	const keywords = [
-		"stereo mix",
-		"what u hear",
-		"monitor",
-		"blackhole",
-		"loopback",
-		"virtual",
-	];
-	return (
-		devices.find(
-			(d) =>
-				d.kind === "audioinput" &&
-				keywords.some((k) => d.label.toLowerCase().includes(k)),
-		) || null
-	);
-}
-
 function Home() {
 	const [isRecording, setIsRecording] = useState(false);
 	const [transcript, setTranscript] = useState("");
 	const [status, setStatus] = useState("Idle");
-	const [systemAudioDetected, setSystemAudioDetected] = useState<
-		boolean | null
-	>(null);
+	const [browserSupported, setBrowserSupported] = useState<boolean | null>(null);
 
 	const wsRef = useRef<WebSocket | null>(null);
 	const audioContextRef = useRef<AudioContext | null>(null);
 	const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
 	const mediaStreamRef = useRef<MediaStream | null>(null);
+
+	// Check browser support for getDisplayMedia with audio
+	const checkBrowserSupport = () => {
+		const isChrome =
+			/Chrome/.test(navigator.userAgent) &&
+			/Google Inc/.test(navigator.vendor);
+		const isEdge = /Edg/.test(navigator.userAgent);
+		setBrowserSupported(isChrome || isEdge);
+		return isChrome || isEdge;
+	};
 
 	const connect = () => {
 		wsRef.current = new WebSocket("ws://localhost:8000/ws");
@@ -72,7 +60,7 @@ function Home() {
 			const data = JSON.parse(event.data);
 			if (data.type === "result") {
 				// Server sends ONLY new text now - just append it
-				setTranscript((prev) => (prev ? prev + " " : "") + data.text.trim());
+				setTranscript((prev) => `${prev ? `${prev} ` : ""}${data.text.trim()}`);
 				setStatus("Transcribing...");
 				setTimeout(() => {
 					if (wsRef.current?.readyState === WebSocket.OPEN)
@@ -91,39 +79,56 @@ function Home() {
 		}
 
 		try {
-			const devices = await navigator.mediaDevices.enumerateDevices();
-			const loopbackDevice = findLoopbackDevice(devices);
-
-			// Universal audio constraints - let browser choose best format
-			let constraints: MediaStreamConstraints = {
-				audio: {
-					channelCount: { ideal: 1 }, // Prefer mono but accept stereo
-					echoCancellation: false,
-					noiseSuppression: false,
-					autoGainControl: false,
-					// Don't specify sampleRate here - browsers handle this differently
-				},
-			};
-
-			if (loopbackDevice) {
-				constraints.audio = {
-					...constraints.audio,
-					deviceId: { exact: loopbackDevice.deviceId },
-				};
-				setSystemAudioDetected(true);
-				setStatus("System Audio Detected & Selected");
-			} else {
-				setSystemAudioDetected(false);
-				setStatus("Using Default Microphone");
+			// Check browser support
+			const supported = checkBrowserSupport();
+			if (!supported) {
+				setStatus("Browser Not Supported - Use Chrome/Edge");
+				return;
 			}
 
-			const stream = await navigator.mediaDevices.getUserMedia(constraints);
+			// Request screen share with audio using getDisplayMedia
+			// Video is required for audio capture, but we can stop the video track after
+			const stream = await navigator.mediaDevices.getDisplayMedia({
+				video: true,
+				audio: {
+					// Request system audio (Chrome 131+)
+					systemAudio: "include",
+					// For window capture, include all system audio
+					windowAudio: "system",
+				},
+			});
+
 			mediaStreamRef.current = stream;
 
+			// Get the audio track from the stream
+			const audioTrack = stream.getAudioTracks()[0];
+			const videoTrack = stream.getVideoTracks()[0];
+
+			if (!audioTrack) {
+				setStatus("No Audio Track - User didn't share audio");
+				// Stop the stream since there's no audio
+				for (const track of stream.getTracks()) {
+					track.stop();
+				}
+				return;
+			}
+
+			// Optional: Stop video track if we only need audio
+			// This reduces resource usage but keeps audio working
+			if (videoTrack) {
+				videoTrack.stop();
+			}
+
+			// Handle user stopping screen share via browser UI
+			audioTrack.onended = () => {
+				stopRecording();
+			};
+
 			// Create AudioContext with browser's default sample rate
-			// This ensures compatibility across all browsers/OS
 			const audioCtx = new (
-				window.AudioContext || (window as any).webkitAudioContext
+				window.AudioContext ||
+				(window as { webkitAudioContext?: typeof AudioContext })
+					.webkitAudioContext
 			)();
 			audioContextRef.current = audioCtx;
 
@@ -168,9 +173,15 @@ function Home() {
 
 			setIsRecording(true);
 			setTranscript("");
+			setStatus("Recording Screen + Audio");
 		} catch (err) {
-			console.error("Mic Error:", err);
-			setStatus("Error: " + (err as Error).message);
+			console.error("Screen Share Error:", err);
+			const error = err as { name?: string; message?: string };
+			if (error.name === "NotAllowedError") {
+				setStatus("Error: Permission Denied");
+			} else {
+				setStatus(`Error: ${error.message ?? "Unknown error"}`);
+			}
 		}
 	};
 
@@ -185,7 +196,9 @@ function Home() {
 			audioContextRef.current = null;
 		}
 		if (mediaStreamRef.current) {
-			mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+			for (const track of mediaStreamRef.current.getTracks()) {
+				track.stop();
+			}
 			mediaStreamRef.current = null;
 		}
 		// Close WebSocket gracefully
@@ -201,9 +214,9 @@ function Home() {
 
 	return (
 		<div className="p-10 font-sans max-w-2xl mx-auto">
-			<h1 className="text-3xl font-bold mb-2">Universal STT</h1>
+			<h1 className="text-3xl font-bold mb-2">Screen + Audio STT</h1>
 			<p className="text-gray-500 mb-6">
-				Timestamp-based Deduplication + Universal Audio Capture
+				Capture screen audio via getDisplayMedia API
 			</p>
 
 			<div className="flex items-center gap-4 mb-6">
@@ -217,20 +230,22 @@ function Home() {
 				</span>
 			</div>
 
-			{isRecording && systemAudioDetected === false && (
-				<div className="mb-6 p-4 bg-yellow-50 border-l-4 border-yellow-400 text-yellow-700 text-sm rounded">
-					<p className="font-bold">System Audio Not Detected</p>
+			{browserSupported === false && (
+				<div className="mb-6 p-4 bg-red-50 border-l-4 border-red-400 text-red-700 text-sm rounded">
+					<p className="font-bold">Browser Not Supported</p>
+					<p className="mt-2">
+						Please use <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> for screen audio capture.
+					</p>
+				</div>
+			)}
+
+			{isRecording && (
+				<div className="mb-6 p-4 bg-blue-50 border-l-4 border-blue-400 text-blue-700 text-sm rounded">
+					<p className="font-bold">Recording Active</p>
 					<ul className="list-disc ml-5 mt-2 space-y-1">
-						<li>
-							<strong>Windows:</strong> Enable "Stereo Mix" in Sound Settings.
-						</li>
-						<li>
-							<strong>macOS:</strong> Install "BlackHole".
-						</li>
-						<li>
-							<strong>Linux:</strong> Use <code>pavucontrol</code> to set
-							"Monitor".
-						</li>
+						<li>Audio is captured from your selected screen/tab</li>
+						<li>Click "Stop Sharing" in browser bar to end</li>
+						<li>Only Chrome/Edge support system audio</li>
 					</ul>
 				</div>
 			)}
@@ -242,7 +257,7 @@ function Home() {
 						onClick={startRecording}
 						className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition"
 					>
-						Start Listening
+						Start Screen Capture
 					</button>
 				) : (
 					<button
