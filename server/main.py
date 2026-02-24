@@ -5,7 +5,6 @@ from db import collection
 from ws_manager import handle_audio_stream
 from vision import load_model, analyze_image
 import asyncio
-import os
 
 app = FastAPI()
 
@@ -27,7 +26,6 @@ app.add_middleware(
 async def startup_event():
     try:
         import traceback
-        os.makedirs("./models", exist_ok=True)
         print("🚀 Starting vision model load...", flush=True)
         load_model()
         print("✅ Vision model + Adapter loaded successfully", flush=True)

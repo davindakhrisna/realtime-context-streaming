@@ -4,10 +4,9 @@ import os
 import base64
 
 model = None
-chat_handler = None
 
 def load_model():
-    global model, chat_handler
+    global model
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     base_path = os.path.join(current_dir, "models")
@@ -31,7 +30,7 @@ def load_model():
     )
 
     print(f"⏳ Loading Llama model (trying GPU first)...", flush=True)
-    
+
     # Try GPU first, fall back to CPU if it fails
     try:
         model = Llama(
@@ -52,7 +51,7 @@ def load_model():
             verbose=False
         )
         print(f"✅ Model loaded on CPU", flush=True)
-    
+
     return model
 
 def analyze_image(image_bytes: bytes, prompt: str = "Describe this image."):
