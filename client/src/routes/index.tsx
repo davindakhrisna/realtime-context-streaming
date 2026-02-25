@@ -1,5 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useRef, useState, useEffect } from "react";
+import { StudyAssistantPanel } from "#/lib/components/StudyAssistantPanel";
+import { BookOpen, FileText, TrendingUp } from 'lucide-react';
 
 export const Route = createFileRoute("/")({
 	component: Home,
@@ -368,6 +370,31 @@ function Home() {
 
 	return (
 		<div className="p-10 font-sans max-w-2xl mx-auto">
+			{/* Navigation */}
+			<nav className="mb-8 flex items-center gap-4 pb-4 border-b border-gray-200 dark:border-gray-700">
+				<Link
+					to="/study/flashcards"
+					className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+				>
+					<BookOpen className="w-4 h-4" />
+					Flashcards
+				</Link>
+				<Link
+					to="/study/stats"
+					className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+				>
+					<TrendingUp className="w-4 h-4" />
+					Statistics
+				</Link>
+				<Link
+					to="/study/materials"
+					className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+				>
+					<FileText className="w-4 h-4" />
+					Study Materials
+				</Link>
+			</nav>
+
 			<h1 className="text-3xl font-bold mb-2">Screen + Audio STT</h1>
 			<p className="text-gray-500 mb-6">
 				Capture screen audio via getDisplayMedia API
@@ -453,6 +480,8 @@ function Home() {
 					</p>
 				</div>
 			)}
+
+			<StudyAssistantPanel />
 		</div>
 	);
 }

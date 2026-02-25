@@ -5,6 +5,7 @@ import numpy as np
 from fastapi import WebSocket
 from models import transcribe_audio_buffer_with_timestamps
 from vision import analyze_image
+from ingestion_buffer import add_to_buffer
 
 # Message type markers
 MSG_TYPE_AUDIO = 0x00
@@ -184,7 +185,7 @@ async def handle_audio_stream(websocket: WebSocket):
                 jpeg_bytes = data[1:]  # Skip type header
                 if DEBUG:
                     print(f"[DEBUG] Received frame: {len(jpeg_bytes)} bytes")
-                
+
                 # Analyze frame with Moondream
                 try:
                     loop = asyncio.get_event_loop()
@@ -194,10 +195,13 @@ async def handle_audio_stream(websocket: WebSocket):
                         jpeg_bytes,
                         "Describe what you see on this screen. Focus on visible text, UI elements, and content."
                     )
-                    
+
                     if DEBUG:
                         print(f"[DEBUG] Frame analysis: {analysis[:100]}...")
-                    
+
+                    # Add to ingestion buffer for batched embedding
+                    add_to_buffer(frame_description=analysis)
+
                     await websocket.send_json({
                         "type": "frame_analysis",
                         "analysis": analysis
@@ -301,6 +305,10 @@ async def handle_audio_stream(websocket: WebSocket):
                     if new_portion.strip():
                         if DEBUG:
                             print(f"[DEBUG] Sending: '{new_portion}'")
+                        
+                        # Add to ingestion buffer for batched embedding
+                        add_to_buffer(transcript=new_portion.strip())
+                        
                         await websocket.send_json({
                             "type": "result",
                             "text": new_portion.strip()
