@@ -9,11 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ScheduleRouteImport } from './routes/Schedule'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as StudyStatsRouteImport } from './routes/study/stats'
 import { Route as StudyMaterialsRouteImport } from './routes/study/materials'
+import { Route as StudyFocusRouteImport } from './routes/study/focus'
 import { Route as StudyFlashcardsRouteImport } from './routes/study/flashcards'
 
+const ScheduleRoute = ScheduleRouteImport.update({
+  id: '/Schedule',
+  path: '/Schedule',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -29,6 +36,11 @@ const StudyMaterialsRoute = StudyMaterialsRouteImport.update({
   path: '/study/materials',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StudyFocusRoute = StudyFocusRouteImport.update({
+  id: '/study/focus',
+  path: '/study/focus',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StudyFlashcardsRoute = StudyFlashcardsRouteImport.update({
   id: '/study/flashcards',
   path: '/study/flashcards',
@@ -37,45 +49,74 @@ const StudyFlashcardsRoute = StudyFlashcardsRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/Schedule': typeof ScheduleRoute
   '/study/flashcards': typeof StudyFlashcardsRoute
+  '/study/focus': typeof StudyFocusRoute
   '/study/materials': typeof StudyMaterialsRoute
   '/study/stats': typeof StudyStatsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/Schedule': typeof ScheduleRoute
   '/study/flashcards': typeof StudyFlashcardsRoute
+  '/study/focus': typeof StudyFocusRoute
   '/study/materials': typeof StudyMaterialsRoute
   '/study/stats': typeof StudyStatsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/Schedule': typeof ScheduleRoute
   '/study/flashcards': typeof StudyFlashcardsRoute
+  '/study/focus': typeof StudyFocusRoute
   '/study/materials': typeof StudyMaterialsRoute
   '/study/stats': typeof StudyStatsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/study/flashcards' | '/study/materials' | '/study/stats'
+  fullPaths:
+    | '/'
+    | '/Schedule'
+    | '/study/flashcards'
+    | '/study/focus'
+    | '/study/materials'
+    | '/study/stats'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/study/flashcards' | '/study/materials' | '/study/stats'
+  to:
+    | '/'
+    | '/Schedule'
+    | '/study/flashcards'
+    | '/study/focus'
+    | '/study/materials'
+    | '/study/stats'
   id:
     | '__root__'
     | '/'
+    | '/Schedule'
     | '/study/flashcards'
+    | '/study/focus'
     | '/study/materials'
     | '/study/stats'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ScheduleRoute: typeof ScheduleRoute
   StudyFlashcardsRoute: typeof StudyFlashcardsRoute
+  StudyFocusRoute: typeof StudyFocusRoute
   StudyMaterialsRoute: typeof StudyMaterialsRoute
   StudyStatsRoute: typeof StudyStatsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/Schedule': {
+      id: '/Schedule'
+      path: '/Schedule'
+      fullPath: '/Schedule'
+      preLoaderRoute: typeof ScheduleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -97,6 +138,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StudyMaterialsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/study/focus': {
+      id: '/study/focus'
+      path: '/study/focus'
+      fullPath: '/study/focus'
+      preLoaderRoute: typeof StudyFocusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/study/flashcards': {
       id: '/study/flashcards'
       path: '/study/flashcards'
@@ -109,7 +157,9 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ScheduleRoute: ScheduleRoute,
   StudyFlashcardsRoute: StudyFlashcardsRoute,
+  StudyFocusRoute: StudyFocusRoute,
   StudyMaterialsRoute: StudyMaterialsRoute,
   StudyStatsRoute: StudyStatsRoute,
 }

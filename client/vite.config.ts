@@ -10,7 +10,8 @@ import { nitro } from 'nitro/vite'
 
 const config = defineConfig({
   plugins: [
-    devtools(),
+    // Load TanStack Devtools only when explicitly enabled via TANSTACK_DEVTOOLS=true
+    ...(process.env.TANSTACK_DEVTOOLS === 'true' ? [devtools()] : []),
     nitro({ rollupConfig: { external: [/^@sentry\//] } }),
     tsconfigPaths({ projects: ['./tsconfig.json'] }),
     tailwindcss(),
