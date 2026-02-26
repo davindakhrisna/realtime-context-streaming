@@ -1,4 +1,7 @@
 import { Search, Bell, HelpCircle } from 'lucide-react';
+import { useAtom } from 'jotai';
+import { focusTimerAtom } from '#/lib/atoms/focusTimerAtom';
+import { useRouter } from '@tanstack/react-router';
 
 interface HeaderProps {
   title: string;
@@ -6,9 +9,26 @@ interface HeaderProps {
 }
 
 export function Header({ title, searchPlaceholder = "Search for subjects, notes, or tools..." }: HeaderProps) {
+  const [timer] = useAtom(focusTimerAtom);
+  const router = useRouter();
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
+  };
+
   return (
     <header className="h-20 border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-30 px-8 flex items-center justify-between">
       <div className="flex items-center gap-8 flex-1">
+        {timer.isActive && (
+          <button
+            onClick={() => router.navigate({ to: '/study/focus' })}
+            className="px-3 py-1 rounded-lg bg-blue-50 text-blue-600 font-mono text-sm hover:bg-blue-100 transition-colors"
+          >
+            {formatTime(timer.timeLeft)}
+          </button>
+        )}
         <h2 className="text-xl font-bold text-slate-900 whitespace-nowrap">{title}</h2>
         <div className="relative w-full max-w-xl">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
@@ -21,7 +41,10 @@ export function Header({ title, searchPlaceholder = "Search for subjects, notes,
       </div>
 
         <div className="flex items-center gap-3 ml-8">
-          <button className="p-2.5 text-slate-500 hover:bg-slate-100 rounded-xl transition-colors">
+          <button
+            onClick={() => router.navigate({ to: '/notifications' as any })}
+            className="p-2.5 text-slate-500 hover:bg-slate-100 rounded-xl transition-colors"
+          >
             <Bell className="size-5" />
           </button>
           <button className="p-2.5 text-slate-500 hover:bg-slate-100 rounded-xl transition-colors">

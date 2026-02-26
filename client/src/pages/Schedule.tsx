@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
+import { useRouter } from '@tanstack/react-router';
 import { 
   ChevronLeft, 
   ChevronRight, 
   Plus, 
-  History, 
   Brain, 
   Lightbulb, 
   Timer, 
@@ -21,7 +21,6 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   format, 
-  addDays, 
   startOfMonth, 
   endOfMonth, 
   eachDayOfInterval, 
@@ -33,8 +32,9 @@ import {
 } from 'date-fns';
 import { PageLayout } from '../components/PageLayout';
 import { cn } from '../lib/utils';
+import { scheduleRemindersForSessions, requestNotificationPermission } from '../lib/notifications';
 
-type Session = {
+export type Session = {
   id: number;
   title: string;
   time: string;
@@ -79,6 +79,20 @@ export function Schedule() {
     }, 60_000);
     return () => clearInterval(t);
   }, []);
+
+  // ask permission when schedule page loads
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      requestNotificationPermission();
+    }
+  }, []);
+
+  // reschedule reminders whenever sessions change
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      scheduleRemindersForSessions(sessions);
+    }
+  }, [sessions]);
 
   // Persist to localStorage whenever sessions change
   React.useEffect(() => {
@@ -136,12 +150,11 @@ export function Schedule() {
 
   const startDay = getDay(monthStart); // 0 (Sun) to 6 (Sat)
 
+  const router = useRouter();
+
   const handleStartFocusSession = () => {
-    // You can replace this with your navigation logic
-    // For now, we'll just show an alert or use window.location
-    window.location.href = '/focus';
-    // Or if you want to show a message instead:
-    // alert('Focus session feature coming soon!');
+    // use the TanStack router instance to programmatically navigate
+    router.navigate({ to: '/study/focus' });
   };
 
   return (

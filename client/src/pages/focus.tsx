@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useAtom } from 'jotai';
+import { focusTimerAtom } from '#/lib/atoms/focusTimerAtom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Play, 
@@ -14,7 +16,7 @@ import {
   Minimize2,
   X
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from '@tanstack/react-router';
 import { cn } from '../lib/utils';
 
 type TimerMode = 'work' | 'shortBreak' | 'longBreak';
@@ -26,41 +28,56 @@ const MODE_CONFIG = {
 };
 
 export function FocusMode() {
-  const navigate = useNavigate();
-  const [mode, setMode] = useState<TimerMode>('work');
-  const [isActive, setIsActive] = useState(false);
+  const router = useRouter();
+  const [timer, setTimer] = useAtom(focusTimerAtom);
+  const { mode, durations, timeLeft, isActive } = timer;
+
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Durations State (in minutes)
-  const [durations, setDurations] = useState(() => {
-    if (typeof window === 'undefined') return { work: 25, shortBreak: 5, longBreak: 15 };
-    const saved = localStorage.getItem('studyai_focus_durations');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return { work: 25, shortBreak: 5, longBreak: 15 };
-      }
-    }
-    return { work: 25, shortBreak: 5, longBreak: 15 };
-  });
+  const toggleTimer = () => {
+    const nextActive = !isActive;
+    setTimer(t => {
+      const end = nextActive ? Date.now() + t.timeLeft * 1000 : null;
+      return { ...t, isActive: nextActive, endTimestamp: end };
+    });
 
-  const [timeLeft, setTimeLeft] = useState(durations.work * 60);
-
-  // Persist durations
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('studyai_focus_durations', JSON.stringify(durations));
+    if (nextActive) {
+      // maybe send motivational quote when starting
+      import('../lib/notifications').then(n => n.sendMotivationalQuote()).catch(() => {});
     }
-  }, [durations]);
+  };
+
+  const resetTimer = useCallback(() => {
+    setTimer(t => ({
+      ...t,
+      isActive: false,
+      timeLeft: durations[mode] * 60,
+      endTimestamp: null,
+    }));
+  }, [durations, mode]);
+
+  const changeMode = (m: TimerMode) => {
+    setTimer(t => ({
+      ...t,
+      mode: m,
+      timeLeft: durations[m] * 60,
+      isActive: false,
+      endTimestamp: null,
+    }));
+  };
+
+  const updateDurations = (newDurs: typeof durations) => {
+    setTimer(t => ({ ...t, durations: newDurs }));
+  };
 
   // Stats State
-  const [stats, setStats] = useState(() => {
+  type Stats = { sessionsToday: number; focusTimeToday: number; streak: number; lastDate: string };
+  const [stats, setStats] = useState<Stats>(() => {
     if (typeof window === 'undefined') return { sessionsToday: 0, focusTimeToday: 0, streak: 0, lastDate: '' };
     const saved = localStorage.getItem('studyai_focus_stats');
-    const defaultStats = { sessionsToday: 0, focusTimeToday: 0, streak: 0, lastDate: '' };
+    const defaultStats: Stats = { sessionsToday: 0, focusTimeToday: 0, streak: 0, lastDate: '' };
     
     if (saved) {
       try {
@@ -69,7 +86,6 @@ export function FocusMode() {
         // Reset daily stats if it's a new day
         if (parsed.lastDate !== today) {
           // Check for streak
-          const lastDate = parsed.lastDate ? new Date(parsed.lastDate) : null;
           const yesterday = new Date();
           yesterday.setDate(yesterday.getDate() - 1);
           
@@ -98,44 +114,31 @@ export function FocusMode() {
     }
   }, [stats]);
 
-  const toggleTimer = () => setIsActive(!isActive);
+  // NOTE: toggleTimer/resetTimer replaced above using atom state
 
-  const resetTimer = useCallback(() => {
-    setIsActive(false);
-    setTimeLeft(durations[mode] * 60);
-  }, [mode, durations]);
-
+  // monitoring of stats remains but timeLeft/isActive are driven by atom
   useEffect(() => {
     let interval: any = null;
     if (isActive && timeLeft > 0) {
       interval = setInterval(() => {
-        setTimeLeft((prev) => {
-          const newTime = prev - 1;
-          // Track focus time in real-time
-          if (mode === 'work') {
-            setStats(prevStats => ({
-              ...prevStats,
-              focusTimeToday: prevStats.focusTimeToday + 1,
-              lastDate: new Date().toDateString()
-            }));
-          }
-          return newTime;
-        });
+        // increment daily focus time stat every second while in work mode
+        if (mode === 'work') {
+          setStats(prevStats => ({
+            ...prevStats,
+            focusTimeToday: prevStats.focusTimeToday + 1,
+            lastDate: new Date().toDateString()
+          }));
+        }
       }, 1000);
     } else if (timeLeft === 0) {
-      setIsActive(false);
-      
-      // Handle session completion
+      // handle end-of-session exactly once
       if (mode === 'work') {
         setStats(prevStats => {
           const today = new Date().toDateString();
           let newStreak = prevStats.streak;
-          
-          // Increment streak if it's the first session of the day
           if (prevStats.lastDate !== today || prevStats.sessionsToday === 0) {
             newStreak = (prevStats.streak || 0) + 1;
           }
-
           return {
             ...prevStats,
             sessionsToday: prevStats.sessionsToday + 1,
@@ -145,7 +148,6 @@ export function FocusMode() {
         });
       }
 
-      // Play sound notification if not muted
       if (!isMuted) {
         const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
         audio.play().catch(() => {});
@@ -154,6 +156,7 @@ export function FocusMode() {
     return () => clearInterval(interval);
   }, [isActive, timeLeft, isMuted, mode]);
 
+  // whenever mode or durations change we need to adjust the persisted end timestamp
   useEffect(() => {
     resetTimer();
   }, [mode, resetTimer]);
@@ -186,10 +189,10 @@ export function FocusMode() {
   };
 
   const handleSaveSettings = (newDurations: typeof durations) => {
-    setDurations(newDurations);
+    updateDurations(newDurations);
     setIsSettingsOpen(false);
     if (!isActive) {
-      setTimeLeft(newDurations[mode] * 60);
+      setTimer(t => ({ ...t, timeLeft: newDurations[mode] * 60 }));
     }
   };
 
@@ -201,7 +204,7 @@ export function FocusMode() {
       {/* Header */}
       <div className="px-8 py-6 flex items-center justify-between">
         <button 
-          onClick={() => navigate('/schedule')}
+          onClick={() => router.navigate({ to: '/Schedule' })}
           className="p-3 hover:bg-white rounded-2xl transition-all border border-transparent hover:border-slate-200 text-slate-400 hover:text-slate-900"
         >
           <ChevronLeft className="size-6" />
@@ -211,7 +214,7 @@ export function FocusMode() {
           {(Object.keys(MODE_CONFIG) as TimerMode[]).map((m) => (
             <button
               key={m}
-              onClick={() => setMode(m)}
+              onClick={() => changeMode(m)}
               className={cn(
                 "px-6 py-2.5 rounded-xl text-sm font-bold transition-all",
                 mode === m 
@@ -385,7 +388,7 @@ export function FocusMode() {
                       min="1"
                       max="120"
                       value={durations[m]}
-                      onChange={(e) => setDurations({ ...durations, [m]: parseInt(e.target.value) || 1 })}
+                      onChange={(e) => updateDurations({ ...durations, [m]: parseInt(e.target.value) || 1 })}
                       className="w-full px-4 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-slate-900"
                     />
                   </div>

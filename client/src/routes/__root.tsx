@@ -6,6 +6,7 @@ import {
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import { Provider } from 'jotai';
+import { FocusTimerProvider } from '../lib/providers/FocusTimerProvider';
 
 import TanStackQueryProvider from "../integrations/tanstack-query/root-provider";
 
@@ -52,7 +53,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 			<body>
 				<Provider>
 					<TanStackQueryProvider>
-						{children}
+						<FocusTimerProvider>
+							{children}
+						</FocusTimerProvider>
 						<TanStackDevtools
 							config={{
 								position: "bottom-right",
